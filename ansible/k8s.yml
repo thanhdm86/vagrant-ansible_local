@@ -1,0 +1,112 @@
+---
+- hosts: all
+  become: true
+  tasks:
+  - name: Install packages that allow apt to be used over HTTPS
+    apt:
+      name: "{{ packages }}"
+      state: present
+      update_cache: yes
+    vars:
+      packages:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg-agent
+      - software-properties-common
+
+  - name: Add an apt signing key for CRIO
+    apt_key:
+      url: 
+      - https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:1.26/xUbuntu_18.04/Release.key
+      - https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_18.04/Release.key
+      state: present
+
+  - name: Add apt repository for 1.26 version
+    apt_repository:
+      repo: 
+      - deb http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/1.26/xUbuntu_18.04/ 
+      - deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_18.04/
+      state: present
+
+  - name: Install CRIO and its dependecies
+    apt: 
+      name: "{{ packages }}"
+      state: present
+      update_cache: yes
+    vars:
+      packages:
+      - crio
+      - crio-o-runc
+      - runc
+    notify:
+      - crio status
+  - name: Remove swapfile from /etc/fstab
+    mount:
+      name: "{{ item }}"
+      fstype: swap
+      state: absent
+    with_items:
+      - swap
+      - none
+
+  - name: Disable swap
+    command: swapoff -a
+    when: ansible_swaptotal_mb > 0
+    
+  - name: Add an apt signing key for Kubernetes
+    apt_key:
+      url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+      state: present
+
+  - name: Adding apt repository for Kubernetes
+    apt_repository:
+      repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+      state: present
+      filename: kubernetes.list
+
+  - name: Install Kubernetes binaries
+    apt: 
+      name: "{{ packages }}"
+      state: present
+      update_cache: yes
+    vars:
+      packages:
+        - kubelet 
+        - kubeadm 
+        - kubectl
+
+  - name: Configure node ip
+    lineinfile:
+      path: /etc/default/kubelet
+      line: KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}
+  - name: create an empty file for the Containerd module
+    copy:
+      content: ""
+      dest: /etc/sysctl.d/kubernetes.conf
+      force: no
+
+  - name: configure modules for Containerd
+    blockinfile:
+      path: /etc/sysctl.d/kubernetes.conf
+      block: |
+            overlay
+            br_netfilter
+
+  - name: configure sysctl params for Kubernetes
+    lineinfile:
+      path: /etc/sysctl.d/kubernetes.conf
+      line: "{{ item }}"
+    with_items:
+      - 'net.bridge.bridge-nf-call-iptables  = 1'
+      - 'net.ipv4.ip_forward                 = 1'
+      - 'net.bridge.bridge-nf-call-ip6tables = 1'
+
+  - name: apply sysctl params without reboot
+    command: sysctl --system
+
+  - name: Restart kubelet
+    service:
+      name: kubelet
+      daemon_reload: yes
+      state: restarted
