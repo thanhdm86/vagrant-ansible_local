@@ -75,11 +75,6 @@
         - kubelet 
         - kubeadm 
         - kubectl
-
-  - name: Configure node ip
-    lineinfile:
-      path: /etc/default/kubelet
-      line: KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}
   - name: create an empty file for the Containerd module
     copy:
       content: ""
